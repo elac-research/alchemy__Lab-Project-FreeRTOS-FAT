@@ -716,7 +716,9 @@ static FF_Error_t prvDetermineFatType( FF_IOManager_t * pxIOManager )
 {
     FF_Partition_t * pxPartition;
     FF_Buffer_t * pxBuffer;
+#if ( ffconfigFAT12_SUPPORT != 0 )
     uint32_t ulFirstWord = 0ul;
+#endif
     FF_Error_t xError = FF_ERR_NONE;
 
     pxPartition = &( pxIOManager->xPartition );
@@ -751,7 +753,9 @@ static FF_Error_t prvDetermineFatType( FF_IOManager_t * pxIOManager )
         }
         else
         {
+#if ( ffconfigFAT12_SUPPORT != 0 )
             ulFirstWord = ( uint32_t ) FF_getShort( pxBuffer->pucBuffer, 0x0000 );
+#endif
             xError = FF_ReleaseBuffer( pxIOManager, pxBuffer );
         }
     }
