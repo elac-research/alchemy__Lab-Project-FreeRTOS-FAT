@@ -1,6 +1,6 @@
 /*
  * FreeRTOS+FAT V2.3.3
- * Copyright (C) 2021 Amazon.com, Inc. or its affiliates.  All Rights Reserved.
+ * Copyright (C) 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -190,7 +190,7 @@ FF_IOManager_t * FF_CreateIOManager( FF_CreationParameters_t * pxParameters,
 
                 if( pxIOManager->pvSemaphoreOpen == NULL )
                 {
-                    /* Tell the user that there was not enough mmory. */
+                    /* Tell the user that there was not enough memory. */
                     xError = FF_createERR( FF_ERR_NOT_ENOUGH_MEMORY, FF_CREATEIOMAN );
                 }
                 else
@@ -235,7 +235,7 @@ FF_IOManager_t * FF_CreateIOManager( FF_CreationParameters_t * pxParameters,
  *
  *	@param	pxIOManager	Pointer to an FF_IOManager_t object, as returned from FF_CreateIOManager.
  *
- *	@return	FF_ERR_NONE on sucess, or a documented error code on failure. (FF_ERR_NULL_POINTER)
+ *	@return	FF_ERR_NONE on success, or a documented error code on failure. (FF_ERR_NULL_POINTER)
  *
  **/
 FF_Error_t FF_DeleteIOManager( FF_IOManager_t * pxIOManager )
@@ -264,12 +264,12 @@ FF_Error_t FF_DeleteIOManager( FF_IOManager_t * pxIOManager )
         }
 
         #if ( ffconfigPROTECT_FF_FOPEN_WITH_SEMAPHORE == 1 )
+        {
+            if( pxIOManager->pvSemaphoreOpen != NULL )
             {
-                if( pxIOManager->pvSemaphoreOpen != NULL )
-                {
-                    vSemaphoreDelete( pxIOManager->pvSemaphoreOpen );
-                }
+                vSemaphoreDelete( pxIOManager->pvSemaphoreOpen );
             }
+        }
         #endif
 
         /* Delete the event group object within the IO manager before deleting
@@ -654,7 +654,7 @@ int32_t FF_BlockWrite( FF_IOManager_t * pxIOManager,
     if( ( slRetVal == 0ul ) && ( pxIOManager->xBlkDevice.fnpWriteBlocks != NULL ) )
     {
         do
-        {   /* Make sure we don't execute a NULL. */
+        { /* Make sure we don't execute a NULL. */
             if( ( xSemLocked == pdFALSE ) &&
                 ( ( pxIOManager->ucFlags & FF_IOMAN_BLOCK_DEVICE_IS_REENTRANT ) == pdFALSE ) )
             {
@@ -705,20 +705,21 @@ static uint8_t ucAssumeFATType = 0;
  *
  * In practice however, this does not always seem to be a correct assumption.
  *
- * The first 12 or 16 bits in the FAT table may also help to determine the
+ * The end-of-chain value in the FAT table may also help to determine the
  * correct FAT-type:
  *
- *    FAT-12: ( firstWord & 0x3FF ) == 0x3F8 )
- *    FAT-16: ( firstWord == 0xFFF8 )
+ *    ulFirstCluster = the first 32-bit of the FAT.
+ *    FAT-12: endOfChain == 0x00000FF8 - 12 bits
+ *    FAT-16: endOfChain == 0x0000FFF8 - 16 bits
+ *    FAT-32: endOfChain == 0x0FFFFFF8 - 32 bits
  */
 
 static FF_Error_t prvDetermineFatType( FF_IOManager_t * pxIOManager )
 {
     FF_Partition_t * pxPartition;
     FF_Buffer_t * pxBuffer;
-#if ( ffconfigFAT12_SUPPORT != 0 )
-    uint32_t ulFirstWord = 0ul;
-#endif
+    /* The first 32-bits of the FAT. */
+    uint32_t ulFirstCluster = 0U;
     FF_Error_t xError = FF_ERR_NONE;
 
     pxPartition = &( pxIOManager->xPartition );
@@ -753,9 +754,8 @@ static FF_Error_t prvDetermineFatType( FF_IOManager_t * pxIOManager )
         }
         else
         {
-#if ( ffconfigFAT12_SUPPORT != 0 )
-            ulFirstWord = ( uint32_t ) FF_getShort( pxBuffer->pucBuffer, 0x0000 );
-#endif
+            /* Read the first 4 bytes at offset 0. */
+            ulFirstCluster = FF_getLong( pxBuffer->pucBuffer, 0U );
             xError = FF_ReleaseBuffer( pxIOManager, pxBuffer );
         }
     }
@@ -768,13 +768,23 @@ static FF_Error_t prvDetermineFatType( FF_IOManager_t * pxIOManager )
                 /* FAT12 */
                 pxPartition->ucType = FF_T_FAT12;
                 #if ( ffconfigFAT_CHECK != 0 )
-                    if( ( ulFirstWord & 0x3FF ) != 0x3F8 )
+                    /* Keep bits 4..11 */
+
+                    /* MS-DOS/PC DOS 3.3 and higher treats a value of 0xFF0 on FAT12.
+                     * See https://en.wikipedia.org/wiki/Design_of_the_FAT_file_system
+                     */
+                    ulFirstCluster &= 0xFF0U;
+
+                    if( ulFirstCluster != 0xFF0U )
                     {
                         xError = FF_createERR( FF_ERR_IOMAN_NOT_FAT_FORMATTED, FF_DETERMINEFATTYPE );
+                        FF_PRINTF( "FAT_CHECK: FAT12 Partition has unexpected FAT data %04lX\n",
+                                   ulFirstCluster );
                     }
                     else
                 #endif /* ffconfigFAT_CHECK */
                 {
+                    /* FAT12 entry OK. */
                     xError = FF_ERR_NONE;
                 }
             }
@@ -786,26 +796,30 @@ static FF_Error_t prvDetermineFatType( FF_IOManager_t * pxIOManager )
             /* FAT 16 */
             pxPartition->ucType = FF_T_FAT16;
             #if ( ffconfigFAT_CHECK != 0 )
+            {
+                /* Keep bits 4..15 */
+                ulFirstCluster &= 0xFFF8U;
+
+                if( ulFirstCluster == 0xFFF8U )
                 {
-                    if( ulFirstWord == 0xFFF8 )
+                    /* FAT16 entry OK. */
+                    xError = FF_ERR_NONE;
+                }
+                else
+                {
+                    if( ( ulFirstCluster & 0xFF8U ) == 0xFF8U )
                     {
-                        xError = FF_ERR_NONE;
+                        FF_PRINTF( "FAT_CHECK: FAT16 Part at %lu is probably a FAT12\n", pxIOManager->xPartition.ulFATBeginLBA );
                     }
                     else
                     {
-                        if( ( ulFirstWord & 0x3FF ) != 0x3F8 )
-                        {
-                            FF_PRINTF( "Part at %lu is probably a FAT12\n", pxIOManager->xPartition.ulFATBeginLBA );
-                        }
-                        else
-                        {
-                            FF_PRINTF( "Partition at %lu has strange FAT data %08lX\n",
-                                       pxIOManager->xPartition.ulFATBeginLBA, ulFirstWord );
-                        }
-
-                        xError = FF_createERR( FF_ERR_IOMAN_INVALID_FORMAT, FF_DETERMINEFATTYPE );
+                        FF_PRINTF( "FAT_CHECK: FAT16 Partition has unexpected FAT data %08lX\n",
+                                   ulFirstCluster );
                     }
+
+                    xError = FF_createERR( FF_ERR_IOMAN_INVALID_FORMAT, FF_DETERMINEFATTYPE );
                 }
+            }
             #endif /* ffconfigFAT_CHECK */
         }
         else
@@ -813,19 +827,21 @@ static FF_Error_t prvDetermineFatType( FF_IOManager_t * pxIOManager )
             /* FAT 32! */
             pxPartition->ucType = FF_T_FAT32;
             #if ( ffconfigFAT_CHECK != 0 )
-                if( ( ( ulFirstWord & 0x0FFFFFF8 ) != 0x0FFFFFF8 ) &&
-                    ( ( ulFirstWord & 0x0FFFFFF8 ) != 0x0FFFFFF0 ) )
+                /* Keep bits 4..27 */
+                ulFirstCluster &= 0x0FFFFFF8UL;
+
+                if( ulFirstCluster != 0x0FFFFFF8UL )
                 {
-                    /* _HT_
-                     * I had an SD-card which worked well in Linux/W32
-                     * but FreeRTOS+FAT returned me this error
-                     * So for me I left out this check (just issue a warning for now)
-                     */
-                    FF_PRINTF( "prvDetermineFatType: firstWord %08lX\n", ulFirstWord );
-                    xError = FF_ERR_NONE; /* FF_ERR_IOMAN_NOT_FAT_FORMATTED; */
+                    FF_PRINTF( "FAT_CHECK: FAT32 Partition at %lu has unexpected FAT data %08lX\n",
+                               pxIOManager->xPartition.ulFATBeginLBA, ulFirstCluster );
+                    xError = FF_ERR_IOMAN_NOT_FAT_FORMATTED;
                 }
+                else
             #endif /* ffconfigFAT_CHECK */
-            xError = FF_ERR_NONE;
+            {
+                /* FAT32 entry OK. */
+                xError = FF_ERR_NONE;
+            }
         }
     }
 
@@ -1408,29 +1424,29 @@ FF_Error_t FF_Mount( FF_Disk_t * pxDisk,
         pxPartition = &( pxIOManager->xPartition );
 
         #if ( ffconfigREMOVABLE_MEDIA != 0 )
-            {
-                pxIOManager->ucFlags &= ( uint8_t ) ( ~( FF_IOMAN_DEVICE_IS_EXTRACTED ) );
-            }
+        {
+            pxIOManager->ucFlags &= ( uint8_t ) ( ~( FF_IOMAN_DEVICE_IS_EXTRACTED ) );
+        }
         #endif /* ffconfigREMOVABLE_MEDIA */
 
         /* FF_IOMAN_InitBufferDescriptors will clear 'pxBuffers' */
         memset( pxIOManager->pucCacheMem, '\0', ( size_t ) pxIOManager->usSectorSize * pxIOManager->usCacheSize );
 
         #if ( ffconfigHASH_CACHE != 0 )
-            {
-                memset( pxIOManager->xHashCache, '\0', sizeof( pxIOManager->xHashCache ) );
+        {
+            memset( pxIOManager->xHashCache, '\0', sizeof( pxIOManager->xHashCache ) );
 
-                for( i = 0; i < ffconfigHASH_CACHE_DEPTH; i++ )
-                {
-                    /* _HT_ Check why did JW put it to 100? */
-                    pxIOManager->xHashCache[ i ].ulMisses = 100;
-                }
+            for( i = 0; i < ffconfigHASH_CACHE_DEPTH; i++ )
+            {
+                /* _HT_ Check why did JW put it to 100? */
+                pxIOManager->xHashCache[ i ].ulMisses = 100;
             }
+        }
         #endif
         #if ( ffconfigPATH_CACHE != 0 )
-            {
-                memset( pxPartition->pxPathCache, '\0', sizeof( pxPartition->pxPathCache ) );
-            }
+        {
+            memset( pxPartition->pxPathCache, '\0', sizeof( pxPartition->pxPathCache ) );
+        }
         #endif
         FF_IOMAN_InitBufferDescriptors( pxIOManager );
         pxIOManager->FirstFile = 0;
@@ -1512,7 +1528,7 @@ FF_Error_t FF_Mount( FF_Disk_t * pxDisk,
         }
 
         if( pxPartition->ulSectorsPerFAT == 0 )
-        {   /* FAT32 */
+        { /* FAT32 */
             pxPartition->ulSectorsPerFAT = FF_getLong( pxBuffer->pucBuffer, FF_FAT_32_SECTORS_PER_FAT );
             pxPartition->ulRootDirCluster = FF_getLong( pxBuffer->pucBuffer, FF_FAT_ROOT_DIR_CLUSTER );
             memcpy( pxPartition->pcVolumeLabel, pxBuffer->pucBuffer + FF_FAT_32_VOL_LABEL, sizeof( pxPartition->pcVolumeLabel ) - 1 );
@@ -1525,9 +1541,9 @@ FF_Error_t FF_Mount( FF_Disk_t * pxDisk,
 
         pxPartition->ulClusterBeginLBA = pxPartition->ulFATBeginLBA + ( pxPartition->ucNumFATS * pxPartition->ulSectorsPerFAT );
         #if ( ffconfigWRITE_FREE_COUNT != 0 ) || ( ffconfigFSINFO_TRUSTED != 0 )
-            {
-                pxPartition->ulFSInfoLBA = pxPartition->ulBeginLBA + FF_getShort( pxBuffer->pucBuffer, 48 );
-            }
+        {
+            pxPartition->ulFSInfoLBA = pxPartition->ulBeginLBA + FF_getShort( pxBuffer->pucBuffer, 48 );
+        }
         #endif
         FF_ReleaseBuffer( pxIOManager, pxBuffer ); /* Release the buffer finally! */
 
@@ -1578,37 +1594,37 @@ FF_Error_t FF_Mount( FF_Disk_t * pxDisk,
         pxPartition->ucPartitionMounted = pdTRUE;
         pxPartition->ulLastFreeCluster = 0;
         #if ( ffconfigMOUNT_FIND_FREE != 0 )
+        {
+            FF_LockFAT( pxIOManager );
             {
-                FF_LockFAT( pxIOManager );
+                /* The parameter 'pdFALSE' means: do not claim the free cluster found. */
+                pxPartition->ulLastFreeCluster = FF_FindFreeCluster( pxIOManager, &xError, pdFALSE );
+            }
+            FF_UnlockFAT( pxIOManager );
+
+            if( FF_isERR( xError ) )
+            {
+                if( FF_GETERROR( xError ) == FF_ERR_IOMAN_NOT_ENOUGH_FREE_SPACE )
                 {
-                    /* The parameter 'pdFALSE' means: do not claim the free cluster found. */
-                    pxPartition->ulLastFreeCluster = FF_FindFreeCluster( pxIOManager, &xError, pdFALSE );
+                    pxPartition->ulLastFreeCluster = 0;
                 }
-                FF_UnlockFAT( pxIOManager );
-
-                if( FF_isERR( xError ) )
-                {
-                    if( FF_GETERROR( xError ) == FF_ERR_IOMAN_NOT_ENOUGH_FREE_SPACE )
-                    {
-                        pxPartition->ulLastFreeCluster = 0;
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-
-                pxPartition->ulFreeClusterCount = FF_CountFreeClusters( pxIOManager, &xError );
-
-                if( FF_isERR( xError ) )
+                else
                 {
                     break;
                 }
             }
-        #else /* if ( ffconfigMOUNT_FIND_FREE != 0 ) */
+
+            pxPartition->ulFreeClusterCount = FF_CountFreeClusters( pxIOManager, &xError );
+
+            if( FF_isERR( xError ) )
             {
-                pxPartition->ulFreeClusterCount = 0;
+                break;
             }
+        }
+        #else /* if ( ffconfigMOUNT_FIND_FREE != 0 ) */
+        {
+            pxPartition->ulFreeClusterCount = 0;
+        }
         #endif /* ffconfigMOUNT_FIND_FREE */
     }
     while( pdFALSE );
@@ -1712,29 +1728,29 @@ FF_Error_t FF_Unmount( FF_Disk_t * pxDisk )
                     pxIOManager->xPartition.ucPartitionMounted = pdFALSE;
 
                     #if ( ffconfigMIRROR_FATS_UMOUNT != 0 )
+                    {
+                        FF_ReleaseSemaphore( pxIOManager->pvSemaphore );
+
+                        for( uxIndex = 0; uxIndex < pxIOManager->xPartition.ulSectorsPerFAT; uxIndex++ )
                         {
-                            FF_ReleaseSemaphore( pxIOManager->pvSemaphore );
+                            pxBuffer = FF_GetBuffer( pxIOManager, pxIOManager->xPartition.ulFATBeginLBA + uxIndex, FF_MODE_READ );
 
-                            for( uxIndex = 0; uxIndex < pxIOManager->xPartition.ulSectorsPerFAT; uxIndex++ )
+                            if( !pxBuffer )
                             {
-                                pxBuffer = FF_GetBuffer( pxIOManager, pxIOManager->xPartition.ulFATBeginLBA + uxIndex, FF_MODE_READ );
-
-                                if( !pxBuffer )
-                                {
-                                    xError = FF_createERR( FF_ERR_DEVICE_DRIVER_FAILED, FF_UNMOUNT );
-                                    break;
-                                }
-
-                                for( y = 0; y < pxIOManager->xPartition.ucNumFATS; y++ )
-                                {
-                                    FF_BlockWrite( pxIOManager,
-                                                   pxIOManager->xPartition.ulFATBeginLBA + ( y * pxIOManager->xPartition.ulSectorsPerFAT ) + uxIndex, 1,
-                                                   pxBuffer->pucBuffer, pdFALSE );
-                                }
+                                xError = FF_createERR( FF_ERR_DEVICE_DRIVER_FAILED, FF_UNMOUNT );
+                                break;
                             }
 
-                            FF_PendSemaphore( pxIOManager->pvSemaphore );
+                            for( y = 0; y < pxIOManager->xPartition.ucNumFATS; y++ )
+                            {
+                                FF_BlockWrite( pxIOManager,
+                                               pxIOManager->xPartition.ulFATBeginLBA + ( y * pxIOManager->xPartition.ulSectorsPerFAT ) + uxIndex, 1,
+                                               pxBuffer->pucBuffer, pdFALSE );
+                            }
                         }
+
+                        FF_PendSemaphore( pxIOManager->pvSemaphore );
+                    }
                     #endif /* if ( ffconfigMIRROR_FATS_UMOUNT != 0 ) */
                 }
             }
@@ -1803,37 +1819,37 @@ FF_Error_t FF_IncreaseFreeClusters( FF_IOManager_t * pxIOManager,
         }
 
         #if ( ffconfigWRITE_FREE_COUNT != 0 )
+        {
+            /* FAT32 updates the FSINFO sector. */
+            if( pxIOManager->xPartition.ucType == FF_T_FAT32 )
             {
-                /* FAT32 updates the FSINFO sector. */
-                if( pxIOManager->xPartition.ucType == FF_T_FAT32 )
+                /* Find the FSINFO sector. */
+                pxBuffer = FF_GetBuffer( pxIOManager, pxIOManager->xPartition.ulFSInfoLBA, FF_MODE_WRITE );
+
+                if( pxBuffer == NULL )
                 {
-                    /* Find the FSINFO sector. */
-                    pxBuffer = FF_GetBuffer( pxIOManager, pxIOManager->xPartition.ulFSInfoLBA, FF_MODE_WRITE );
+                    xError = FF_createERR( FF_ERR_DEVICE_DRIVER_FAILED, FF_INCREASEFREECLUSTERS );
+                }
+                else
+                {
+                    uint32_t ulSignature1;
+                    uint32_t ulSignature2;
 
-                    if( pxBuffer == NULL )
+                    ulSignature1 = FF_getLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_SIGNATURE1_000 );
+                    ulSignature2 = FF_getLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_SIGNATURE2_484 );
+
+                    if( ( ulSignature1 == FS_INFO_SIGNATURE1_0x41615252 ) &&
+                        ( ulSignature2 == FS_INFO_SIGNATURE2_0x61417272 ) )
                     {
-                        xError = FF_createERR( FF_ERR_DEVICE_DRIVER_FAILED, FF_INCREASEFREECLUSTERS );
+                        /* FSINFO sector magic numbers we're verified. Safe to write. */
+                        FF_putLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_FREE_COUNT_488, pxIOManager->xPartition.ulFreeClusterCount );
+                        FF_putLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_FREE_CLUSTER_492, pxIOManager->xPartition.ulLastFreeCluster );
                     }
-                    else
-                    {
-                        uint32_t ulSignature1;
-                        uint32_t ulSignature2;
 
-                        ulSignature1 = FF_getLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_SIGNATURE1_000 );
-                        ulSignature2 = FF_getLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_SIGNATURE2_484 );
-
-                        if( ( ulSignature1 == FS_INFO_SIGNATURE1_0x41615252 ) &&
-                            ( ulSignature2 == FS_INFO_SIGNATURE2_0x61417272 ) )
-                        {
-                            /* FSINFO sector magic numbers we're verified. Safe to write. */
-                            FF_putLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_FREE_COUNT_488, pxIOManager->xPartition.ulFreeClusterCount );
-                            FF_putLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_FREE_CLUSTER_492, pxIOManager->xPartition.ulLastFreeCluster );
-                        }
-
-                        xError = FF_ReleaseBuffer( pxIOManager, pxBuffer );
-                    }
+                    xError = FF_ReleaseBuffer( pxIOManager, pxBuffer );
                 }
             }
+        }
         #endif /* if ( ffconfigWRITE_FREE_COUNT != 0 ) */
     }
     while( pdFALSE );
@@ -1877,31 +1893,31 @@ FF_Error_t FF_DecreaseFreeClusters( FF_IOManager_t * pxIOManager,
     if( FF_isERR( xError ) == pdFALSE )
     {
         #if ( ffconfigWRITE_FREE_COUNT != 0 )
+        {
+            /* FAT32 update the FSINFO sector. */
+            if( pxIOManager->xPartition.ucType == FF_T_FAT32 )
             {
-                /* FAT32 update the FSINFO sector. */
-                if( pxIOManager->xPartition.ucType == FF_T_FAT32 )
+                /* Find the FSINFO sector. */
+                pxBuffer = FF_GetBuffer( pxIOManager, pxIOManager->xPartition.ulFSInfoLBA, FF_MODE_WRITE );
+
+                if( pxBuffer == NULL )
                 {
-                    /* Find the FSINFO sector. */
-                    pxBuffer = FF_GetBuffer( pxIOManager, pxIOManager->xPartition.ulFSInfoLBA, FF_MODE_WRITE );
-
-                    if( pxBuffer == NULL )
+                    xError = FF_createERR( FF_ERR_DEVICE_DRIVER_FAILED, FF_DECREASEFREECLUSTERS );
+                }
+                else
+                {
+                    if( ( FF_getLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_SIGNATURE1_000 ) == FS_INFO_SIGNATURE1_0x41615252 ) &&
+                        ( FF_getLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_SIGNATURE2_484 ) == FS_INFO_SIGNATURE2_0x61417272 ) )
                     {
-                        xError = FF_createERR( FF_ERR_DEVICE_DRIVER_FAILED, FF_DECREASEFREECLUSTERS );
+                        /* FSINFO sector magic nums we're verified. Safe to write. */
+                        FF_putLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_FREE_COUNT_488, pxIOManager->xPartition.ulFreeClusterCount );
+                        FF_putLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_FREE_CLUSTER_492, pxIOManager->xPartition.ulLastFreeCluster );
                     }
-                    else
-                    {
-                        if( ( FF_getLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_SIGNATURE1_000 ) == FS_INFO_SIGNATURE1_0x41615252 ) &&
-                            ( FF_getLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_SIGNATURE2_484 ) == FS_INFO_SIGNATURE2_0x61417272 ) )
-                        {
-                            /* FSINFO sector magic nums we're verified. Safe to write. */
-                            FF_putLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_FREE_COUNT_488, pxIOManager->xPartition.ulFreeClusterCount );
-                            FF_putLong( pxBuffer->pucBuffer, FS_INFO_OFFSET_FREE_CLUSTER_492, pxIOManager->xPartition.ulLastFreeCluster );
-                        }
 
-                        xError = FF_ReleaseBuffer( pxIOManager, pxBuffer );
-                    }
+                    xError = FF_ReleaseBuffer( pxIOManager, pxBuffer );
                 }
             }
+        }
         #endif /* if ( ffconfigWRITE_FREE_COUNT != 0 ) */
     }
 

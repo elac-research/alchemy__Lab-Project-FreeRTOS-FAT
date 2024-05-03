@@ -1,6 +1,6 @@
 /*
  * FreeRTOS+FAT V2.3.3
- * Copyright (C) 2021 Amazon.com, Inc. or its affiliates.  All Rights Reserved.
+ * Copyright (C) 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -50,7 +50,7 @@
     #endif
 
     #ifdef __cplusplus
-        extern "C" {
+    extern "C" {
     #endif
 
 /* Error return from some functions. */
@@ -89,9 +89,9 @@
 
         /* Note time_t must be used here otherwise will have bugs when 2032 (uint32_t second clock rolls over) */
         #if ( ffconfigTIME_SUPPORT == 1 )
-            time_t st_atime;
-            time_t st_mtime;
-            time_t st_ctime;
+            time_t ff_atime;
+            time_t ff_mtime;
+            time_t ff_ctime;
         #endif /* ffconfigTIME_SUPPORT */
     } FF_Stat_t;
 
@@ -402,7 +402,7 @@
                          eFileAction_t aAction );
 
     #ifdef __cplusplus
-        } /* extern "C" */
+}         /* extern "C" */
     #endif
 
 #endif /* FF_STDIO_H */

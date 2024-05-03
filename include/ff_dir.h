@@ -1,6 +1,6 @@
 /*
  * FreeRTOS+FAT V2.3.3
- * Copyright (C) 2021 Amazon.com, Inc. or its affiliates.  All Rights Reserved.
+ * Copyright (C) 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -171,6 +171,16 @@ int8_t FF_PushEntry( FF_IOManager_t * pxIOManager,
                      uint16_t usEntry,
                      uint8_t * buffer,
                      void * pParam );
+
+/*
+ * FF_IsNameCompliant is a function that checks if a given path name
+ * contains any legal characters only.
+ */
+#if ( ffconfigUNICODE_UTF16_SUPPORT != 0 )
+    BaseType_t FF_IsNameCompliant( const FF_T_WCHAR * pcName );
+#else
+    BaseType_t FF_IsNameCompliant( const char * pcName );
+#endif
 
 static portINLINE BaseType_t FF_isEndOfDir( const uint8_t * pucEntryBuffer )
 {

@@ -22,7 +22,7 @@ endif()
 #   - when OFF - device support is disabled and not used.
 #   - When ON  - device support is enabled and the ff_devices.h API is used.
 # Optional:  FREERTOS_PLUS_FAT_PORT
-#   - When not defined - identifies native platform Linxu or MinGW and uses that port.
+#   - When not defined - identifies native platform Linux or MinGW and uses that port.
 #   - When defined as A_CUSTOM_PORT - the port library must be defined in advance.
 #   - When any of the other supported ports - the port library is defined by portable source files.
 option(FREERTOS_PLUS_FAT_DEV_SUPPORT "FreeRTOS Plus FAT Device selection support" OFF)
@@ -36,7 +36,8 @@ set(FREERTOS_PLUS_FAT_PORT_LIST
     AVR32_UC3
     LPC18XX
     POSIX
-    STM32FXX
+    STM32F4XX
+    STM32F7XX
     STM32HXX
     ZYNQ
     ZYNQ_2019_3
@@ -89,6 +90,12 @@ elseif((FREERTOS_PLUS_FAT_PORT STREQUAL "A_CUSTOM_PORT") AND (NOT TARGET freerto
         "       freertos_plus_fat)")
 endif()
 
+# This library requires access to a heap
+# FreeRTOS/FreeRTOS-Kernel previously defaulted to heap4.c
+if(NOT DEFINED FREERTOS_HEAP)
+    message(STATUS "FREERTOS_HEAP not set, setting FREERTOS_HEAP=4")
+    set(FREERTOS_HEAP 4)
+endif()
 
 # Select the appropriate Build Test configuration
 # This is only used when freertos_config is not defined, otherwise the build test will be performed
@@ -113,7 +120,7 @@ endif()
 #   - When ON  - FreeRTOS-kernel will be fetch using CMake FetchContent_Declare function.
 # Optional:  FREERTOS_PLUS_FAT_FETCH_FREERTOS_GIT_REPO
 # Optional:  FREERTOS_PLUS_FAT_FETCH_FREERTOS_GIT_TAG
-option(FREERTOS_PLUS_FAT_FETCH_FREERTOS "FreeRTOS-Kernel automatic fecth support" ON)
+option(FREERTOS_PLUS_FAT_FETCH_FREERTOS "FreeRTOS-Kernel automatic fetch support" ON)
 set(FREERTOS_PLUS_FAT_FETCH_FREERTOS_GIT_REPO "https://github.com/FreeRTOS/FreeRTOS-Kernel.git" CACHE STRING "")
 set(FREERTOS_PLUS_FAT_FETCH_FREERTOS_GIT_TAG "main" CACHE STRING "")
 
@@ -212,6 +219,13 @@ target_link_libraries( freertos_plus_fat
 
 add_subdirectory(portable)
 add_subdirectory(test)
+
+# This library requires access to a heap
+# FreeRTOS/FreeRTOS-Kernel previously defaulted to heap_4.c
+if(NOT DEFINED FREERTOS_HEAP)
+    message(STATUS "FREERTOS_HEAP not set, setting FREERTOS_HEAP=4")
+    set(FREERTOS_HEAP 4)
+endif()
 
 if(FREERTOS_PLUS_FAT_FETCH_FREERTOS)
   FetchContent_MakeAvailable(freertos_kernel)

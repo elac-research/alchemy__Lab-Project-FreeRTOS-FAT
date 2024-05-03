@@ -1,6 +1,6 @@
 /*
  * FreeRTOS+FAT V2.3.3
- * Copyright (C) 2021 Amazon.com, Inc. or its affiliates.  All Rights Reserved.
+ * Copyright (C) 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of
  * this software and associated documentation files (the "Software"), to deal in
@@ -28,11 +28,18 @@
 
     #define __SDDISK_H__
 
+    #include "ff_headers.h"
+
     #ifdef __cplusplus
-        extern "C" {
+    extern "C" {
     #endif
 
-    #include "ff_headers.h"
+/* @brief Initialization settings for more granular control on init. */
+    typedef struct FFInitSettings_s
+    {
+        BaseType_t xMountFailIgnore; /**< Ignore failure when mounting */
+        BaseType_t xDiskPartition;   /**< Default disk partition number */
+    } FFInitSettings_t;
 
 
 /* Return non-zero if the SD-card is present.
@@ -40,6 +47,9 @@
     BaseType_t FF_SDDiskDetect( FF_Disk_t * pxDisk );
 
 /* Create a RAM disk, supplying enough memory to hold N sectors of 512 bytes each */
+    FF_Disk_t * FF_SDDiskInitWithSettings( const char * pcName,
+                                           const FFInitSettings_t * pxSettings );
+
     FF_Disk_t * FF_SDDiskInit( const char * pcName );
 
     BaseType_t FF_SDDiskReinit( FF_Disk_t * pxDisk );
@@ -67,11 +77,11 @@
     BaseType_t FF_SDDiskInserted( BaseType_t xDriveNr );
 
 /* _RB_ Temporary function - ideally the application would not need the IO
- * manageer structure, just a handle to a disk. */
+ * manager structure, just a handle to a disk. */
     FF_IOManager_t * sddisk_ioman( FF_Disk_t * pxDisk );
 
     #ifdef __cplusplus
-        } /* extern "C" */
+}         /* extern "C" */
     #endif
 
 #endif /* __SDDISK_H__ */

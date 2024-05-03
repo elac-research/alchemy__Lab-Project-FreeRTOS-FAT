@@ -432,20 +432,19 @@ static CacheMemoryInfo_t * pucGetSDIOCacheMemory( BaseType_t xPartition )
 }
 /*-----------------------------------------------------------*/
 
-/* Initialise the SDIO driver and mount an SD card */
-BaseType_t xMountFailIgnore = 0;
-
-/* _HT_ : the function FF_SDDiskInit() used to mount partition-0.
- * It would be nice if it has a parameter indicating the partition
- * number.
- * As for now, the partion can be set with a global variable 'xDiskPartition'.
- */
-BaseType_t xDiskPartition = 0;
-
 FF_Disk_t * FF_SDDiskInit( const char * pcName )
 {
+    const FFInitSettings_t defaultSettings = {};
+
+    return FF_SDDiskInitWithSettings( pcName, &defaultSettings );
+}
+/*-----------------------------------------------------------*/
+
+/* Initialise the SDIO driver and mount an SD card */
+FF_Disk_t * FF_SDDiskInitWithSettings( const char * pcName,
+                                       const FFInitSettings_t * pxSettings )
+{
     FF_Error_t xFFError;
-    BaseType_t xPartitionNumber = xDiskPartition;
     FF_CreationParameters_t xParameters;
     FF_Disk_t * pxDisk = NULL;
     CacheMemoryInfo_t * pxCacheMem = NULL;
@@ -456,13 +455,13 @@ FF_Disk_t * FF_SDDiskInit( const char * pcName )
 
     do
     {
-        if( pucGetSDIOCacheMemory( xPartitionNumber ) == NULL )
+        if( pucGetSDIOCacheMemory( pxSettings->xDiskPartition ) == NULL )
         {
             FF_PRINTF( "FF_SDDiskInit: Cached memory failed\n" );
             break;
         }
 
-        pxCacheMem = pxCacheMemories[ xPartitionNumber ];
+        pxCacheMem = pxCacheMemories[ pxSettings->xDiskPartition ];
 
         if( pxSDCardInstance == NULL )
         {
@@ -470,16 +469,16 @@ FF_Disk_t * FF_SDDiskInit( const char * pcName )
         }
 
         #if ( ffconfigSDIO_DRIVER_USES_INTERRUPT != 0 )
+        {
+            for( iIndex = 0; iIndex < ARRAY_SIZE( xSDSemaphores ); iIndex++ )
             {
-                for( iIndex = 0; iIndex < ARRAY_SIZE( xSDSemaphores ); iIndex++ )
+                if( xSDSemaphores[ iIndex ] == NULL )
                 {
-                    if( xSDSemaphores[ iIndex ] == NULL )
-                    {
-                        xSDSemaphores[ iIndex ] = xSemaphoreCreateBinary();
-                        configASSERT( xSDSemaphores[ iIndex ] != NULL );
-                    }
+                    xSDSemaphores[ iIndex ] = xSemaphoreCreateBinary();
+                    configASSERT( xSDSemaphores[ iIndex ] != NULL );
                 }
             }
+        }
         #endif /* if ( ffconfigSDIO_DRIVER_USES_INTERRUPT != 0 ) */
 
         if( sd_disk_status != XST_SUCCESS )
@@ -551,14 +550,14 @@ FF_Disk_t * FF_SDDiskInit( const char * pcName )
         }
 
         pxDisk->xStatus.bIsInitialised = pdTRUE;
-        pxDisk->xStatus.bPartitionNumber = xPartitionNumber;
+        pxDisk->xStatus.bPartitionNumber = pxSettings->xDiskPartition;
 
         if( FF_SDDiskMount( pxDisk ) == 0 )
         {
             /* _HT_ Suppose that the partition is not yet
              * formatted, it might be desireable to have a valid
              * i/o manager. */
-            if( xMountFailIgnore == 0 )
+            if( pxSettings->xMountFailIgnore == 0 )
             {
                 FF_SDDiskDelete( pxDisk );
                 pxDisk = NULL;
@@ -778,7 +777,7 @@ BaseType_t FF_SDDiskShowPartition( FF_Disk_t * pxDisk )
         FF_PRINTF( "DataSectors    %8u\n", ( unsigned ) pxIOManager->xPartition.ulDataSectors );
         FF_PRINTF( "SecsPerCluster %8u\n", ( unsigned ) pxIOManager->xPartition.ulSectorsPerCluster );
         FF_PRINTF( "Size           %8u MB\n", ( unsigned ) ulTotalSizeMB );
-        FF_PRINTF( "FreeSize       %8u MB ( %d perc free )\n", ( unsigned ) ulFreeSizeMB, ( int ) iPercentageFree );
+        FF_PRINTF( "FreeSize       %8u MB ( %d percent free )\n", ( unsigned ) ulFreeSizeMB, ( int ) iPercentageFree );
         FF_PRINTF( "BeginLBA       %8u\n", ( unsigned ) pxIOManager->xPartition.ulBeginLBA );
         FF_PRINTF( "FATBeginLBA    %8u\n", ( unsigned ) pxIOManager->xPartition.ulFATBeginLBA );
     }
@@ -847,9 +846,9 @@ static int vSDMMC_Init( int iDriveNumber )
         }
 
         #if ( ffconfigSDIO_DRIVER_USES_INTERRUPT != 0 )
-            {
-                vInstallInterrupt();
-            }
+        {
+            vInstallInterrupt();
+        }
         #endif /* ffconfigSDIO_DRIVER_USES_INTERRUPT */
         iReturnCode = XSdPs_CardInitialize( pxSDCardInstance );
 
